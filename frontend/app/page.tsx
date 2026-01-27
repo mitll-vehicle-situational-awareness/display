@@ -1,23 +1,27 @@
 "use client";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import {useState, useEffect} from "react";
+import { useState, useEffect } from "react";
+
+type Point = { x: number; y: number };
 
 interface ApiData {
-  name: string;
-  message: string;
+  count: number;
+  file: string;
+  points: Point[];
 }
 
 export default function Home() {
   const [data, setData] = useState<ApiData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
   useEffect(() => {
-      fetch("http://127.0.0.1:5000/api/data")
-      .then(response => response.json())
-      .then(data => {
-        setData(data);
+    fetch("http://localhost:5000/api/data?file=1")
+      .then((response) => response.json())
+      .then((json) => {
+        setData(json);
         setIsLoading(false);
       })
-      .catch(error => {
+      .catch((error) => {
         console.error("Error:", error);
         setIsLoading(false);
       });
@@ -25,6 +29,8 @@ export default function Home() {
 
   if (isLoading) return <p>Loading...</p>;
   if (!data) return <p>No data found</p>;
+
+  const first = data.points?.[0];
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -36,11 +42,19 @@ export default function Home() {
           </CardHeader>
 
           <CardContent>
-            <div>
-              {/* This will eventually hold the front camera view */}
-              <p>{data.message || "No data found"}</p>
-              <p>{data.name || "No name found"}</p>
+            <div className="space-y-2">
+              <p>
+                <span className="font-semibold">Source:</span> {data.file}
+              </p>
+              <p>
+                <span className="font-semibold">Points:</span> {data.count}
+              </p>
+              <p>
+                <span className="font-semibold">First point:</span>{" "}
+                {first ? `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})` : "none"}
+              </p>
 
+              {/* Later: this left card becomes the scatter plot */}
             </div>
           </CardContent>
         </Card>
@@ -51,22 +65,17 @@ export default function Home() {
             <CardHeader>
               <CardTitle>Point Cloud 3D View</CardTitle>
             </CardHeader>
-            <CardContent>
-              {/* 3D visualization goes here */}
-            </CardContent>
+            <CardContent>{/* 3D visualization goes here */}</CardContent>
           </Card>
 
           <Card className="flex-1">
             <CardHeader>
               <CardTitle>Detected Objects</CardTitle>
             </CardHeader>
-            <CardContent>
-              {/* Detected objects info goes here */}
-            </CardContent>
+            <CardContent>{/* Detected objects info goes here */}</CardContent>
           </Card>
         </div>
       </main>
     </div>
   );
 }
-
