@@ -180,7 +180,12 @@ export default function Home() {
                           background: "rgba(10, 15, 30, 0.95)",
                           border: "1px solid rgba(255,255,255,0.15)",
                           borderRadius: 12,
-                          color: "#FFFFFF", // ← THIS makes hover text white
+                        }}
+                        itemStyle={{
+                          color: "#FFFFFF", // ← THIS controls coordinate text
+                        }}
+                        labelStyle={{
+                          color: "#FFFFFF", // ← header text
                         }}
                       />
                       <Scatter data={displayPoints} fill="#7CFFB2" />
