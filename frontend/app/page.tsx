@@ -47,20 +47,20 @@ export default function Home() {
       });
   }, []);
 
-  // Flip animation (file 1 <-> file 2)
+  // Flip animation
   useEffect(() => {
     if (!playing) return;
 
     const id = setInterval(() => {
       setFrame((f) => (f === 1 ? 2 : 1));
-    }, 700); // flip speed (ms)
+    }, 700);
 
     return () => clearInterval(id);
   }, [playing]);
 
   const displayPoints = frame === 1 ? p1 : p2;
 
-  // Fixed axis domains computed from both datasets
+  // Fixed axis domains
   const { xDomain, yDomain } = useMemo(() => {
     const all = [...p1, ...p2];
     if (all.length === 0) return { xDomain: [0, 1], yDomain: [0, 1] };
@@ -80,71 +80,74 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
       <main className="flex w-[80vw] flex-row gap-4 py-8 px-4 h-[90vh]">
-        {/* Left large card */}
+        {/* Main left card — camera placeholder */}
         <Card className="w-2/3 h-full">
           <CardHeader>
             <CardTitle>Live Camera View</CardTitle>
           </CardHeader>
-
-          <CardContent>
-            {/* Controls */}
-            <div className="mb-3 flex items-center gap-3 text-sm">
-              <button
-                className="px-3 py-1 rounded border"
-                onClick={() => setPlaying((p) => !p)}
-              >
-                {playing ? "Pause" : "Play"}
-              </button>
-              <div className="text-zinc-600 dark:text-zinc-300">
-                Showing: detected_positions{frame === 1 ? "" : "2"}.csv
-              </div>
-            </div>
-
-            {/* Radar panel */}
-            <div className="h-[65vh] w-full rounded-xl border bg-white dark:bg-zinc-950 p-3">
-              <ResponsiveContainer>
-                <ScatterChart>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    type="number"
-                    dataKey="x"
-                    domain={xDomain}
-                    tickFormatter={(v) => Number(v).toFixed(2)}
-                    label={{ value: "X (m)", position: "bottom" }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="y"
-                    domain={yDomain}
-                    tickFormatter={(v) => Number(v).toFixed(2)}
-                    label={{ value: "Y (m)", angle: -90, position: "left" }}
-                  />
-                  <Tooltip formatter={(v) => Number(v).toFixed(2)} />
-                  <Scatter data={displayPoints} />
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
+          <CardContent className="flex h-full items-center justify-center text-zinc-500 dark:text-zinc-400">
+            Camera feed will be displayed here
           </CardContent>
         </Card>
 
         {/* Right column */}
         <div className="flex flex-col w-1/3 h-full gap-4">
+          {/* Radar / Point Cloud */}
           <Card className="flex-1">
             <CardHeader>
-              <CardTitle>Point Cloud 3D View</CardTitle>
+              <CardTitle>Radar Point Cloud</CardTitle>
             </CardHeader>
-            <CardContent />
+
+            <CardContent>
+              {/* Controls */}
+              <div className="mb-2 flex items-center gap-3 text-sm">
+                <button
+                  className="px-3 py-1 rounded border"
+                  onClick={() => setPlaying((p) => !p)}
+                >
+                  {playing ? "Pause" : "Play"}
+                </button>
+                <div className="text-zinc-600 dark:text-zinc-300">
+                  Showing: detected_positions{frame === 1 ? "" : "2"}.csv
+                </div>
+              </div>
+
+              {/* Radar panel */}
+              <div className="h-[32vh] w-full rounded-xl border bg-white dark:bg-zinc-950 p-2">
+                <ResponsiveContainer>
+                  <ScatterChart>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      domain={xDomain}
+                      tickFormatter={(v) => Number(v).toFixed(2)}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      domain={yDomain}
+                      tickFormatter={(v) => Number(v).toFixed(2)}
+                    />
+                    <Tooltip formatter={(v) => Number(v).toFixed(2)} />
+                    <Scatter data={displayPoints} />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
           </Card>
 
+          {/* Bottom right card */}
           <Card className="flex-1">
             <CardHeader>
               <CardTitle>Detected Objects</CardTitle>
             </CardHeader>
-            <CardContent />
+            <CardContent className="text-zinc-500 dark:text-zinc-400">
+              Object metadata will appear here
+            </CardContent>
           </Card>
         </div>
       </main>
     </div>
   );
 }
-
