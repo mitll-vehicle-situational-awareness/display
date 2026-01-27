@@ -53,19 +53,27 @@ export default function Home() {
           </CardHeader>
 
           <CardContent>
-            <div className="space-y-2">
-              <p>
-                <span className="font-semibold">Source:</span> {data.file}
-              </p>
-              <p>
-                <span className="font-semibold">Points:</span> {data.count}
-              </p>
-              <p>
-                <span className="font-semibold">First point:</span>{" "}
-                {first ? `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})` : "none"}
-              </p>
-
-              {/* Later: this left card becomes the scatter plot */}
+            <div className="h-[70vh] w-full">
+              <div className="mb-3 text-sm text-zinc-600 dark:text-zinc-300 space-y-1">
+                <div><span className="font-semibold">Source:</span> {data.file}</div>
+                <div><span className="font-semibold">Points:</span> {data.count}</div>
+                <div>
+                  <span className="font-semibold">First point:</span>{" "}
+                  {first ? `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})` : "none"}
+                </div>
+              </div>
+          
+              <div className="h-[60vh] w-full">
+                <ResponsiveContainer>
+                  <ScatterChart>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" dataKey="x" name="X (m)" />
+                    <YAxis type="number" dataKey="y" name="Y (m)" />
+                    <Tooltip />
+                    <Scatter data={data.points} />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </CardContent>
         </Card>
