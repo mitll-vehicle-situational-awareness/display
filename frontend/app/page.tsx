@@ -11,7 +11,7 @@ export default function Home() {
   const [data, setData] = useState<ApiData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   useEffect(() => {
-      fetch("http://localhost:5000/api/data?file=1")
+      fetch("http://127.0.0.1:5000/api/data")
       .then(response => response.json())
       .then(data => {
         setData(data);
