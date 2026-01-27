@@ -2,6 +2,17 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useState, useEffect } from "react";
 
+import {
+  ResponsiveContainer,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
+
+
 type Point = { x: number; y: number };
 
 interface ApiData {
