@@ -64,12 +64,15 @@ def radar_points_alias():
 # Webcam streaming (MJPEG)
 # ----------------------------
 def make_camera(src: int = 0):
-    cap = cv2.VideoCapture(src)
+    if sys.platform.startswith("win"):
+        cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
+    elif sys.platform == "darwin":
+        cap = cv2.VideoCapture(src)
+    else:
+        cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
 
-    # Optional: set preferred resolution (camera may ignore)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
     return cap
 
 
