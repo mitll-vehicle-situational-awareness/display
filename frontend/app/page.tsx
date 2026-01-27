@@ -12,7 +12,6 @@ import {
   Tooltip,
 } from "recharts";
 
-
 type Point = { x: number; y: number };
 
 interface ApiData {
@@ -22,26 +21,69 @@ interface ApiData {
 }
 
 export default function Home() {
-  const [data, setData] = useState<ApiData | null>(null);
+  const [p1, setP1] = useState<Point[]>([]);
+  const [p2, setP2] = useState<Point[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [playing, setPlaying] = useState(true);
+  const [mode, setMode] = useState<"flip" | "smooth">("smooth");
+  const [frame, setFrame] = useState<1 | 2>(1); // flip mode
+  const [t, setT] = useState(0); // smooth mode 0..1
+
+  // Load both snapshots once
   useEffect(() => {
-    fetch("http://localhost:5001/api/data?file=1")
-      .then((response) => response.json())
-      .then((json) => {
-        setData(json);
+    Promise.all([
+      fetch("http://localhost:5001/api/data?file=1").then((r) => r.json() as Promise<ApiData>),
+      fetch("http://localhost:5001/api/data?file=2").then((r) => r.json() as Promise<ApiData>),
+    ])
+      .then(([d1, d2]) => {
+        setP1(d1.points ?? []);
+        setP2(d2.points ?? []);
         setIsLoading(false);
       })
-      .catch((error) => {
-        console.error("Error:", error);
+      .catch((err) => {
+        console.error("Error:", err);
         setIsLoading(false);
       });
   }, []);
 
-  if (isLoading) return <p>Loading...</p>;
-  if (!data) return <p>No data found</p>;
+  // Animate
+  useEffect(() => {
+    if (!playing) return;
 
-  const first = data.points?.[0];
+    const id = setInterval(() => {
+      if (mode === "flip") {
+        setFrame((f) => (f === 1 ? 2 : 1));
+      } else {
+        setT((prev) => {
+          const next = prev + 0.03; // speed
+          return next >= 1 ? 0 : next;
+        });
+      }
+    }, 50);
+
+    return () => clearInterval(id);
+  }, [playing, mode]);
+
+  if (isLoading) return <p>Loading...</p>;
+  if (p1.length === 0 && p2.length === 0) return <p>No data found</p>;
+
+  const displayPoints: Point[] = (() => {
+    if (mode === "flip") return frame === 1 ? p1 : p2;
+
+    // smooth interpolate between p1 and p2 (pair by index)
+    const n = Math.min(p1.length, p2.length);
+    const out: Point[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push({
+        x: p1[i].x + (p2[i].x - p1[i].x) * t,
+        y: p1[i].y + (p2[i].y - p1[i].y) * t,
+      });
+    }
+    return out;
+  })();
+
+  const first = displayPoints?.[0];
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -53,27 +95,65 @@ export default function Home() {
           </CardHeader>
 
           <CardContent>
-            <div className="h-[70vh] w-full">
-              <div className="mb-3 text-sm text-zinc-600 dark:text-zinc-300 space-y-1">
-                <div><span className="font-semibold">Source:</span> {data.file}</div>
-                <div><span className="font-semibold">Points:</span> {data.count}</div>
-                <div>
-                  <span className="font-semibold">First point:</span>{" "}
-                  {first ? `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})` : "none"}
-                </div>
+            {/* Controls */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button
+                className="px-3 py-1 rounded border border-zinc-300 dark:border-zinc-700"
+                onClick={() => setPlaying((p) => !p)}
+              >
+                {playing ? "Pause" : "Play"}
+              </button>
+
+              <button
+                className={`px-3 py-1 rounded border ${
+                  mode === "flip"
+                    ? "border-zinc-900 dark:border-zinc-200"
+                    : "border-zinc-300 dark:border-zinc-700"
+                }`}
+                onClick={() => setMode("flip")}
+              >
+                Flip
+              </button>
+
+              <button
+                className={`px-3 py-1 rounded border ${
+                  mode === "smooth"
+                    ? "border-zinc-900 dark:border-zinc-200"
+                    : "border-zinc-300 dark:border-zinc-700"
+                }`}
+                onClick={() => setMode("smooth")}
+              >
+                Smooth
+              </button>
+
+              <div className="text-sm text-zinc-600 dark:text-zinc-300">
+                Mode: {mode}
+                {mode === "flip" ? ` (showing file ${frame})` : ` (t=${t.toFixed(2)})`}
               </div>
-          
-              <div className="h-[60vh] w-full">
-                <ResponsiveContainer>
-                  <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" dataKey="x" name="X (m)" />
-                    <YAxis type="number" dataKey="y" name="Y (m)" />
-                    <Tooltip />
-                    <Scatter data={data.points} />
-                  </ScatterChart>
-                </ResponsiveContainer>
+            </div>
+
+            {/* Info */}
+            <div className="mb-3 text-sm text-zinc-600 dark:text-zinc-300 space-y-1">
+              <div>
+                <span className="font-semibold">Points shown:</span> {displayPoints.length}
               </div>
+              <div>
+                <span className="font-semibold">First point:</span>{" "}
+                {first ? `(${first.x.toFixed(3)}, ${first.y.toFixed(3)})` : "none"}
+              </div>
+            </div>
+
+            {/* Styled radar panel */}
+            <div className="h-[60vh] w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
+              <ResponsiveContainer>
+                <ScatterChart>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" dataKey="x" name="X (m)" />
+                  <YAxis type="number" dataKey="y" name="Y (m)" />
+                  <Tooltip />
+                  <Scatter data={displayPoints} />
+                </ScatterChart>
+              </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
