@@ -2,9 +2,9 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
 
@@ -14,14 +14,78 @@ interface ApiData {
 }
 
 /**
+ * Computes a bounding sphere (center + radius) for a set of points.
+ */
+function computeBoundingSphere(points: Point[]) {
+  if (points.length === 0) {
+    return { center: new THREE.Vector3(0, 0, 0), radius: 5 };
+  }
+  const box = new THREE.Box3();
+  for (const p of points) box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z));
+
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  // radius ~ half diagonal
+  const radius = Math.max(0.001, size.length() * 0.5);
+  return { center, radius };
+}
+
+/**
+ * Sets camera once to frame the bounding sphere.
+ * Also sets near/far appropriately so points don’t clip.
+ */
+function FitCameraOnce({
+  center,
+  radius,
+}: {
+  center: [number, number, number];
+  radius: number;
+}) {
+  const { camera } = useThree();
+  const didInit = useRef(false);
+
+  useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
+
+    const c = new THREE.Vector3(center[0], center[1], center[2]);
+
+    // Distance that fits sphere in view (simple heuristic)
+    const fov = (camera as THREE.PerspectiveCamera).fov ?? 50;
+    const fovRad = (fov * Math.PI) / 180;
+    const dist = radius / Math.tan(fovRad / 2);
+
+    camera.position.set(c.x, c.y, c.z + dist * 1.2);
+    camera.near = Math.max(0.01, dist / 100);
+    camera.far = dist * 100;
+    camera.lookAt(c);
+    camera.updateProjectionMatrix();
+  }, [camera, center, radius]);
+
+  return null;
+}
+
+/**
  * Interpolates point cloud between two snapshots a -> b using t in [0,1].
  * Assumes points correspond by index (same ordering). Uses min length.
  */
-function LerpPointCloud({ a, b, t }: { a: Point[]; b: Point[]; t: number }) {
-  // Create geometry once
+function LerpPointCloud({
+  a,
+  b,
+  t,
+  pointSize = 0.12,
+}: {
+  a: Point[];
+  b: Point[];
+  t: number;
+  pointSize?: number;
+}) {
   const geom = useMemo(() => new THREE.BufferGeometry(), []);
 
-  // Create / re-create attribute when point counts change
   const attr = useMemo(() => {
     const n = Math.min(a.length, b.length);
     const arr = new Float32Array(n * 3);
@@ -31,7 +95,6 @@ function LerpPointCloud({ a, b, t }: { a: Point[]; b: Point[]; t: number }) {
     return attribute;
   }, [geom, a.length, b.length]);
 
-  // Update positions each frame
   useFrame(() => {
     const n = Math.min(a.length, b.length);
     const arr = attr.array as Float32Array;
@@ -55,7 +118,7 @@ function LerpPointCloud({ a, b, t }: { a: Point[]; b: Point[]; t: number }) {
 
   return (
     <points geometry={geom}>
-      <pointsMaterial color="#7CFFB2" size={0.12} sizeAttenuation />
+      <pointsMaterial color="#7CFFB2" size={pointSize} sizeAttenuation />
     </points>
   );
 }
@@ -71,7 +134,6 @@ export default function Home() {
   const [t, setT] = useState(0);
   const [dir, setDir] = useState<1 | -1>(1);
 
-  // Load both CSV snapshots (each returns x,y,z)
   useEffect(() => {
     Promise.all([
       fetch("http://127.0.0.1:5001/api/data?file=1").then(
@@ -92,35 +154,13 @@ export default function Home() {
       });
   }, []);
 
-  // Fixed center so axes/grid don't "follow" the object.
-  // (Uses average of all points across both frames.)
-  const fixedCenter = useMemo(() => {
-    const all = [...p1, ...p2];
-    if (all.length === 0) return [0, 0, 0] as [number, number, number];
-    let sx = 0,
-      sy = 0,
-      sz = 0;
-    for (const p of all) {
-      sx += p.x;
-      sy += p.y;
-      sz += p.z;
-    }
-    return [sx / all.length, sy / all.length, sz / all.length] as [
-      number,
-      number,
-      number
-    ];
-  }, [p1, p2]);
-
   // Smooth ping-pong animation between the two snapshots
   useEffect(() => {
     if (!playing) return;
 
     let raf = 0;
     let last = performance.now();
-
-    // Tuning knob: seconds to go from t=0 -> t=1 (lower = faster)
-    const secondsPerLeg = 0.7;
+    const secondsPerLeg = 0.7; // speed knob
 
     const loop = (now: number) => {
       const dt = (now - last) / 1000;
@@ -146,6 +186,22 @@ export default function Home() {
   }, [playing, dir]);
 
   const pointCount = Math.min(p1.length, p2.length);
+
+  // Use BOTH frames to compute a fixed bounding sphere
+  const bounds = useMemo(() => {
+    const all = [...p1, ...p2];
+    const { center, radius } = computeBoundingSphere(all);
+    return {
+      center: [center.x, center.y, center.z] as [number, number, number],
+      radius,
+    };
+  }, [p1, p2]);
+
+  // Make point size scale a bit with data size (so it stays visible)
+  const pointSize = useMemo(() => {
+    // if radius is big, points should be slightly bigger; if tiny, keep a minimum
+    return Math.max(0.03, Math.min(0.25, bounds.radius / 80));
+  }, [bounds.radius]);
 
   if (isLoading) {
     return (
@@ -213,16 +269,13 @@ export default function Home() {
                 </div>
 
                 <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] overflow-hidden">
-                  <Canvas
-                    camera={{
-                      position: [fixedCenter[0], fixedCenter[1], fixedCenter[2] + 10],
-                      fov: 50,
-                    }}
-                  >
+                  <Canvas camera={{ fov: 50 }}>
+                    {/* Ensure camera frames data so you can always see it */}
+                    <FitCameraOnce center={bounds.center} radius={bounds.radius} />
+
                     <ambientLight intensity={0.7} />
                     <pointLight position={[10, 10, 10]} intensity={0.8} />
 
-                    {/* Grid “floor” */}
                     <Grid
                       args={[20, 20]}
                       cellSize={1}
@@ -234,15 +287,13 @@ export default function Home() {
                       infiniteGrid={false}
                     />
 
-                    {/* Axes */}
                     <axesHelper args={[5]} />
 
-                    {/* Interpolated point cloud */}
-                    <LerpPointCloud a={p1} b={p2} t={t} />
+                    <LerpPointCloud a={p1} b={p2} t={t} pointSize={pointSize} />
 
-                    {/* Controls locked to fixed center so world doesn't "track" */}
+                    {/* Keep controls target fixed, so axes/grid don’t “follow” the motion */}
                     <OrbitControls
-                      target={fixedCenter}
+                      target={bounds.center}
                       enablePan
                       enableRotate
                       enableZoom
@@ -256,7 +307,8 @@ export default function Home() {
 
                 {p1.length !== p2.length && (
                   <div className="mt-2 text-[11px] text-amber-300/80">
-                    Note: point counts differ (frame1={p1.length}, frame2={p2.length}). Interpolating first {pointCount} points by index.
+                    Note: point counts differ (frame1={p1.length}, frame2={p2.length}). Interpolating first{" "}
+                    {pointCount} points by index.
                   </div>
                 )}
               </CardContent>
