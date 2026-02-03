@@ -1,6 +1,5 @@
 "use client";
 
-
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
+import { DetectedObjectNotification } from "@/components/DetectedObjectNotification";
 
 type Point = { x: number; y: number; z: number };
 interface ApiData {
@@ -301,14 +301,38 @@ export default function Home() {
               </CardContent>
             </Card>
 
+            {/* ✅ Partner's Detected Objects card added without changing your logic */}
             <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold tracking-wide text-white/90">
                   Detected Objects
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-white/60">
-                Object metadata will appear here
+              <CardContent className="flex flex-col gap-3">
+                <DetectedObjectNotification
+                  icon="🚶"
+                  object="Pedestrian"
+                  distance="15m"
+                  speed="5 km/h"
+                  angle="45°"
+                  riskLevel="High"
+                />
+                <DetectedObjectNotification
+                  icon="🚗"
+                  object="Vehicle"
+                  distance="30m"
+                  speed="60 km/h"
+                  angle="0°"
+                  riskLevel="Medium"
+                />
+                <DetectedObjectNotification
+                  icon="🚴"
+                  object="Cyclist"
+                  distance="8m"
+                  speed="20 km/h"
+                  angle="90°"
+                  riskLevel="Low"
+                />
               </CardContent>
             </Card>
           </div>
