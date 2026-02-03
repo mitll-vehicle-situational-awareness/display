@@ -5,6 +5,7 @@ import os
 import sys
 import cv2
 
+
 app = Flask(__name__)
 CORS(app)
 
