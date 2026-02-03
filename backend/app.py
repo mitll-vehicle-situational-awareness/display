@@ -2,13 +2,14 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import csv
 import os
+import sys
 import cv2
 
 app = Flask(__name__)
 CORS(app)
 
 # ----------------------------
-# Radar CSV helpers (unchanged)
+# Radar CSV helpers (now includes z)
 # ----------------------------
 def read_points_from_csv(csv_path: str):
     points = []
@@ -16,10 +17,12 @@ def read_points_from_csv(csv_path: str):
         reader = csv.DictReader(f)
         for row in reader:
             try:
-                x = float(row["detected_x_m"])
-                y = float(row["detected_y_m"])
-                points.append({"x": x, "y": y})
-            except (KeyError, ValueError):
+                x = float(row.get("detected_x_m", row.get("x")))
+                y = float(row.get("detected_y_m", row.get("y")))
+                z = float(row.get("detected_z_m", row.get("z")))
+                points.append({"x": x, "y": y, "z": z})
+            except (TypeError, ValueError):
+                # TypeError covers None -> float(None) when missing columns
                 continue
     return points
 
@@ -64,13 +67,15 @@ def radar_points_alias():
 # Webcam streaming (MJPEG)
 # ----------------------------
 def make_camera(src: int = 0):
+    # Platform-specific backend selection improves reliability
     if sys.platform.startswith("win"):
-        cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)  # Windows
     elif sys.platform == "darwin":
-        cap = cv2.VideoCapture(src)
+        cap = cv2.VideoCapture(src)  # macOS
     else:
-        cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+        cap = cv2.VideoCapture(src, cv2.CAP_V4L2)  # Linux
 
+    # Optional: request resolution (camera may ignore)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     return cap
@@ -79,7 +84,6 @@ def make_camera(src: int = 0):
 def gen_frames(src: int = 0):
     cap = make_camera(src)
     if not cap.isOpened():
-        # can't open camera; stop stream
         return
 
     try:
@@ -92,10 +96,9 @@ def gen_frames(src: int = 0):
             if not ok:
                 continue
 
-            frame_bytes = buffer.tobytes()
             yield (
                 b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
             )
     finally:
         cap.release()
@@ -120,5 +123,4 @@ def webcam():
 
 
 if __name__ == "__main__":
-    # Keep 5001 because macOS often steals 5000
     app.run(debug=True, port=5001, host="0.0.0.0")
