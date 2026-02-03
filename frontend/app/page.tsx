@@ -2,7 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
@@ -37,6 +37,32 @@ function computeRadius(points: Point[], center: [number, number, number]) {
   return Math.sqrt(r2);
 }
 
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+/**
+ * Interpolates points by index between A and B.
+ * If lengths differ, we "pad" using the last available point in that set (or origin).
+ */
+function interpolatePoints(a: Point[], b: Point[], t: number): Point[] {
+  const n = Math.max(a.length, b.length);
+  const aFallback = a.length ? a[a.length - 1] : { x: 0, y: 0, z: 0 };
+  const bFallback = b.length ? b[b.length - 1] : { x: 0, y: 0, z: 0 };
+
+  const out = new Array<Point>(n);
+  for (let i = 0; i < n; i++) {
+    const pa = a[i] ?? aFallback;
+    const pb = b[i] ?? bFallback;
+    out[i] = {
+      x: lerp(pa.x, pb.x, t),
+      y: lerp(pa.y, pb.y, t),
+      z: lerp(pa.z, pb.z, t),
+    };
+  }
+  return out;
+}
+
 function PointCloud({ points }: { points: Point[] }) {
   const positions = useMemo(() => {
     const arr = new Float32Array(points.length * 3);
@@ -68,7 +94,12 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [playing, setPlaying] = useState(true);
-  const [frame, setFrame] = useState<1 | 2>(1);
+
+  // Animation state: we tween between endpoints rather than hard flip
+  const [segment, setSegment] = useState<1 | 2>(1); // 1 = p1->p2, 2 = p2->p1
+  const [t, setT] = useState(0); // 0..1 progress within current segment
+  const rafRef = useRef<number | null>(null);
+  const lastTsRef = useRef<number | null>(null);
 
   // Fixed radar view (prevents snapping/jumping)
   const [fixedCenter, setFixedCenter] = useState<[number, number, number]>([
@@ -112,14 +143,53 @@ export default function Home() {
       });
   }, []);
 
-  // Flip between the two snapshots
+  // Animate t between 0 and 1, then swap segment and continue
   useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => setFrame((f) => (f === 1 ? 2 : 1)), 700);
-    return () => clearInterval(id);
+    if (!playing) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      lastTsRef.current = null;
+      return;
+    }
+
+    const DURATION_MS = 700; // match your previous flip interval feel
+    const step = (ts: number) => {
+      if (lastTsRef.current == null) lastTsRef.current = ts;
+      const dt = ts - lastTsRef.current;
+      lastTsRef.current = ts;
+
+      setT((prev) => {
+        const next = prev + dt / DURATION_MS;
+        if (next >= 1) {
+          // complete this segment, swap direction, restart at 0
+          setSegment((s) => (s === 1 ? 2 : 1));
+          return 0;
+        }
+        return next;
+      });
+
+      rafRef.current = requestAnimationFrame(step);
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      lastTsRef.current = null;
+    };
   }, [playing]);
 
-  const displayPoints = frame === 1 ? p1 : p2;
+  const [fromPts, toPts] = segment === 1 ? [p1, p2] : [p2, p1];
+
+  const displayPoints = useMemo(() => {
+    // Smoothstep feel (optional): makes easing nicer than linear
+    const tt = t * t * (3 - 2 * t); // smoothstep
+    return interpolatePoints(fromPts, toPts, tt);
+  }, [fromPts, toPts, t]);
+
+  // For label only (keeps your “which csv” text intuitive)
+  const labelFrame: 1 | 2 = segment === 1 ? (t < 0.5 ? 1 : 2) : t < 0.5 ? 2 : 1;
 
   if (isLoading) {
     return (
@@ -174,7 +244,7 @@ export default function Home() {
               <CardContent>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-xs text-white/60">
-                    detected_positions{frame === 1 ? "" : "2"}.csv • points:{" "}
+                    detected_positions{labelFrame === 1 ? "" : "2"}.csv • points:{" "}
                     {displayPoints.length}
                   </div>
                   <Button
@@ -187,7 +257,7 @@ export default function Home() {
                 </div>
 
                 <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] overflow-hidden">
-                  {/* IMPORTANT: camera + target are FIXED so the view doesn't snap */}
+                  {/* Camera + target are FIXED so the view doesn't snap */}
                   <Canvas camera={{ position: camPos, fov: 50 }}>
                     <ambientLight intensity={0.7} />
                     <pointLight position={[10, 10, 10]} intensity={0.8} />
@@ -242,3 +312,5 @@ export default function Home() {
     </div>
   );
 }
+
+
