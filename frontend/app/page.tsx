@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
-import { DetectedObjectNotification } from "@/components/DetectedObjectNotification";
+import { DetectedObjectNotification } from "@/components/ui/DetectedObjectNotification";
 
 
 type Point = { x: number; y: number; z: number };
