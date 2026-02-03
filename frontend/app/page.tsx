@@ -13,6 +13,30 @@ interface ApiData {
   points: Point[];
 }
 
+function computeCenter(points: Point[]): [number, number, number] {
+  if (!points.length) return [0, 0, 0];
+  let sx = 0,
+    sy = 0,
+    sz = 0;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+    sz += p.z;
+  }
+  return [sx / points.length, sy / points.length, sz / points.length];
+}
+
+function computeRadius(points: Point[], center: [number, number, number]) {
+  let r2 = 0;
+  for (const p of points) {
+    const dx = p.x - center[0];
+    const dy = p.y - center[1];
+    const dz = p.z - center[2];
+    r2 = Math.max(r2, dx * dx + dy * dy + dz * dz);
+  }
+  return Math.sqrt(r2);
+}
+
 function PointCloud({ points }: { points: Point[] }) {
   const positions = useMemo(() => {
     const arr = new Float32Array(points.length * 3);
@@ -33,11 +57,7 @@ function PointCloud({ points }: { points: Point[] }) {
 
   return (
     <points geometry={geometry}>
-      <pointsMaterial
-        color="#7CFFB2"
-        size={0.12}
-        sizeAttenuation
-      />
+      <pointsMaterial color="#7CFFB2" size={0.12} sizeAttenuation />
     </points>
   );
 }
@@ -50,15 +70,40 @@ export default function Home() {
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState<1 | 2>(1);
 
+  // Fixed radar view (prevents snapping/jumping)
+  const [fixedCenter, setFixedCenter] = useState<[number, number, number]>([
+    0, 0, 0,
+  ]);
+  const [camPos, setCamPos] = useState<[number, number, number]>([0, 0, 10]);
+
   // Load both CSV snapshots (each returns x,y,z)
   useEffect(() => {
     Promise.all([
-      fetch("http://127.0.0.1:5001/api/data?file=1").then((r) => r.json() as Promise<ApiData>),
-      fetch("http://127.0.0.1:5001/api/data?file=2").then((r) => r.json() as Promise<ApiData>),
+      fetch("http://127.0.0.1:5001/api/data?file=1").then(
+        (r) => r.json() as Promise<ApiData>
+      ),
+      fetch("http://127.0.0.1:5001/api/data?file=2").then(
+        (r) => r.json() as Promise<ApiData>
+      ),
     ])
       .then(([d1, d2]) => {
-        setP1(d1.points ?? []);
-        setP2(d2.points ?? []);
+        const pts1 = d1.points ?? [];
+        const pts2 = d2.points ?? [];
+
+        setP1(pts1);
+        setP2(pts2);
+
+        // Compute a stable target + camera based on all points from both snapshots
+        const all = [...pts1, ...pts2];
+        const c = computeCenter(all);
+        const radius = computeRadius(all, c);
+
+        setFixedCenter(c);
+
+        // Stable camera distance that fits the data (tweak multiplier if needed)
+        const dist = Math.max(10, radius * 2.5);
+        setCamPos([c[0], c[1] + dist * 0.2, c[2] + dist]);
+
         setIsLoading(false);
       })
       .catch((e) => {
@@ -75,14 +120,6 @@ export default function Home() {
   }, [playing]);
 
   const displayPoints = frame === 1 ? p1 : p2;
-
-  // Center camera roughly around points (simple heuristic)
-  const center = useMemo(() => {
-    if (displayPoints.length === 0) return [0, 0, 0] as [number, number, number];
-    let sx = 0, sy = 0, sz = 0;
-    for (const p of displayPoints) { sx += p.x; sy += p.y; sz += p.z; }
-    return [sx / displayPoints.length, sy / displayPoints.length, sz / displayPoints.length] as [number, number, number];
-  }, [displayPoints]);
 
   if (isLoading) {
     return (
@@ -137,15 +174,21 @@ export default function Home() {
               <CardContent>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-xs text-white/60">
-                    detected_positions{frame === 1 ? "" : "2"}.csv • points: {displayPoints.length}
+                    detected_positions{frame === 1 ? "" : "2"}.csv • points:{" "}
+                    {displayPoints.length}
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => setPlaying((p) => !p)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPlaying((p) => !p)}
+                  >
                     {playing ? "Pause" : "Play"}
                   </Button>
                 </div>
 
                 <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] overflow-hidden">
-                  <Canvas camera={{ position: [center[0], center[1], center[2] + 10], fov: 50 }}>
+                  {/* IMPORTANT: camera + target are FIXED so the view doesn't snap */}
+                  <Canvas camera={{ position: camPos, fov: 50 }}>
                     <ambientLight intensity={0.7} />
                     <pointLight position={[10, 10, 10]} intensity={0.8} />
 
@@ -167,8 +210,13 @@ export default function Home() {
                     {/* Point cloud */}
                     <PointCloud points={displayPoints} />
 
-                    {/* Controls */}
-                    <OrbitControls target={center} enablePan enableRotate enableZoom />
+                    {/* Controls (fixed target prevents jumping) */}
+                    <OrbitControls
+                      target={fixedCenter}
+                      enablePan
+                      enableRotate
+                      enableZoom
+                    />
                   </Canvas>
                 </div>
 
