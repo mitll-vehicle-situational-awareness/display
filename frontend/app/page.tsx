@@ -2,21 +2,44 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import {
-  ResponsiveContainer,
-  ScatterChart,
-  Scatter,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from "recharts";
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls, Grid } from "@react-three/drei";
+import * as THREE from "three";
 
-type Point = { x: number; y: number };
+type Point = { x: number; y: number; z: number };
 interface ApiData {
   points: Point[];
+}
+
+function PointCloud({ points }: { points: Point[] }) {
+  const positions = useMemo(() => {
+    const arr = new Float32Array(points.length * 3);
+    for (let i = 0; i < points.length; i++) {
+      arr[i * 3 + 0] = points[i].x;
+      arr[i * 3 + 1] = points[i].y;
+      arr[i * 3 + 2] = points[i].z;
+    }
+    return arr;
+  }, [points]);
+
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    g.computeBoundingSphere();
+    return g;
+  }, [positions]);
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial
+        color="#7CFFB2"
+        size={0.12}
+        sizeAttenuation
+      />
+    </points>
+  );
 }
 
 export default function Home() {
@@ -27,49 +50,39 @@ export default function Home() {
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState<1 | 2>(1);
 
-  // Load both radar snapshots
+  // Load both CSV snapshots (each returns x,y,z)
   useEffect(() => {
     Promise.all([
-      fetch("http://127.0.0.1:5001/api/data?file=1").then(
-        (r) => r.json() as Promise<ApiData>
-      ),
-      fetch("http://127.0.0.1:5001/api/data?file=2").then(
-        (r) => r.json() as Promise<ApiData>
-      ),
+      fetch("http://127.0.0.1:5001/api/data?file=1").then((r) => r.json() as Promise<ApiData>),
+      fetch("http://127.0.0.1:5001/api/data?file=2").then((r) => r.json() as Promise<ApiData>),
     ])
       .then(([d1, d2]) => {
         setP1(d1.points ?? []);
         setP2(d2.points ?? []);
         setIsLoading(false);
       })
-      .catch(() => setIsLoading(false));
+      .catch((e) => {
+        console.error(e);
+        setIsLoading(false);
+      });
   }, []);
 
-  // Flip animation
+  // Flip between the two snapshots
   useEffect(() => {
     if (!playing) return;
-    const id = setInterval(() => {
-      setFrame((f) => (f === 1 ? 2 : 1));
-    }, 700);
+    const id = setInterval(() => setFrame((f) => (f === 1 ? 2 : 1)), 700);
     return () => clearInterval(id);
   }, [playing]);
 
   const displayPoints = frame === 1 ? p1 : p2;
 
-  // Fixed axis domains
-  const { xDomain, yDomain } = useMemo(() => {
-    const all = [...p1, ...p2];
-    if (all.length === 0) return { xDomain: [0, 1], yDomain: [0, 1] };
-
-    const xs = all.map((p) => p.x);
-    const ys = all.map((p) => p.y);
-    const pad = 0.25;
-
-    return {
-      xDomain: [Math.min(...xs) - pad, Math.max(...xs) + pad] as [number, number],
-      yDomain: [Math.min(...ys) - pad, Math.max(...ys) + pad] as [number, number],
-    };
-  }, [p1, p2]);
+  // Center camera roughly around points (simple heuristic)
+  const center = useMemo(() => {
+    if (displayPoints.length === 0) return [0, 0, 0] as [number, number, number];
+    let sx = 0, sy = 0, sz = 0;
+    for (const p of displayPoints) { sx += p.x; sy += p.y; sz += p.z; }
+    return [sx / displayPoints.length, sy / displayPoints.length, sz / displayPoints.length] as [number, number, number];
+  }, [displayPoints]);
 
   if (isLoading) {
     return (
@@ -83,7 +96,6 @@ export default function Home() {
     <div className="min-h-screen bg-[#070B14] text-white">
       <div className="mx-auto max-w-[1400px] px-6 py-6">
         <div className="flex gap-6">
-
           {/* LEFT: Live Camera */}
           <div className="w-2/3">
             <Card className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
@@ -96,33 +108,13 @@ export default function Home() {
               </div>
 
               <div className="relative h-[78vh]">
-                {/* Webcam stream */}
                 <img
                   src="http://127.0.0.1:5001/api/webcam"
                   alt="Live webcam"
                   className="absolute inset-0 h-full w-full object-cover"
                 />
-
-                {/* Overlay gradient */}
                 <div className="absolute inset-0 bg-gradient-to-b from-[#0B1221]/30 via-[#070B14]/30 to-black/40" />
 
-                {/* Grid */}
-                <div
-                  className="absolute inset-0 opacity-[0.16]"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(to right, rgba(255,255,255,0.10) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.10) 1px, transparent 1px)",
-                    backgroundSize: "72px 72px",
-                  }}
-                />
-
-                {/* Crosshair */}
-                <div className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-sky-300/50">
-                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-sky-300/30" />
-                  <div className="absolute top-1/2 left-0 h-px w-full -translate-y-1/2 bg-sky-300/30" />
-                </div>
-
-                {/* Controls */}
                 <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-3">
                   <Button variant="destructive">● Stop Recording</Button>
                   <Button variant="secondary" disabled>
@@ -133,72 +125,59 @@ export default function Home() {
             </Card>
           </div>
 
-          {/* RIGHT: Radar + Objects */}
+          {/* RIGHT: 3D Radar */}
           <div className="w-1/3 flex flex-col gap-6">
-
-            {/* Radar */}
             <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold tracking-wide text-white/90">
-                  Radar Data (2D)
+                  Radar Data (3D)
                 </CardTitle>
               </CardHeader>
 
               <CardContent>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-xs text-white/60">
-                    detected_positions{frame === 1 ? "" : "2"}.csv
+                    detected_positions{frame === 1 ? "" : "2"}.csv • points: {displayPoints.length}
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPlaying((p) => !p)}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setPlaying((p) => !p)}>
                     {playing ? "Pause" : "Play"}
                   </Button>
                 </div>
 
-                <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] p-2">
-                  <ResponsiveContainer>
-                    <ScatterChart>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis
-                        type="number"
-                        dataKey="x"
-                        domain={xDomain}
-                        tickFormatter={(v) => Number(v).toFixed(2)}
-                        tick={{ fill: "rgba(255,255,255,0.6)", fontSize: 11 }}
-                      />
-                      <YAxis
-                        type="number"
-                        dataKey="y"
-                        domain={yDomain}
-                        tickFormatter={(v) => Number(v).toFixed(2)}
-                        tick={{ fill: "rgba(255,255,255,0.6)", fontSize: 11 }}
-                      />
-                      <Tooltip
-                        formatter={(v) => Number(v).toFixed(2)}
-                        contentStyle={{
-                          background: "rgba(10,15,30,0.95)",
-                          border: "1px solid rgba(255,255,255,0.15)",
-                          borderRadius: 12,
-                        }}
-                        itemStyle={{ color: "#FFFFFF" }}
-                        labelStyle={{ color: "#FFFFFF" }}
-                      />
-                      <Scatter data={displayPoints} fill="#7CFFB2" />
-                    </ScatterChart>
-                  </ResponsiveContainer>
+                <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] overflow-hidden">
+                  <Canvas camera={{ position: [center[0], center[1], center[2] + 10], fov: 50 }}>
+                    <ambientLight intensity={0.7} />
+                    <pointLight position={[10, 10, 10]} intensity={0.8} />
+
+                    {/* Grid “floor” */}
+                    <Grid
+                      args={[20, 20]}
+                      cellSize={1}
+                      cellThickness={0.5}
+                      sectionSize={5}
+                      sectionThickness={1}
+                      fadeDistance={25}
+                      fadeStrength={1}
+                      infiniteGrid={false}
+                    />
+
+                    {/* Axes */}
+                    <axesHelper args={[5]} />
+
+                    {/* Point cloud */}
+                    <PointCloud points={displayPoints} />
+
+                    {/* Controls */}
+                    <OrbitControls target={center} enablePan enableRotate enableZoom />
+                  </Canvas>
                 </div>
 
-                <div className="mt-2 flex justify-between text-[11px] text-white/50">
-                  <div>Points: {displayPoints.length}</div>
-                  <div>Depth: 0–40m</div>
+                <div className="mt-2 text-[11px] text-white/50">
+                  Drag to rotate • Scroll to zoom
                 </div>
               </CardContent>
             </Card>
 
-            {/* Detected Objects */}
             <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold tracking-wide text-white/90">
@@ -209,7 +188,6 @@ export default function Home() {
                 Object metadata will appear here
               </CardContent>
             </Card>
-
           </div>
         </div>
       </div>
