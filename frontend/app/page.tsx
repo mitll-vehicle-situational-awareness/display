@@ -9,6 +9,7 @@ import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import { DetectedObjectNotification } from "@/components/DetectedObjectNotification";
 
+
 type Point = { x: number; y: number; z: number };
 interface ApiData {
   points: Point[];
