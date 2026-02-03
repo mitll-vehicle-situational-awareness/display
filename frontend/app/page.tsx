@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
 
@@ -13,31 +13,49 @@ interface ApiData {
   points: Point[];
 }
 
-function PointCloud({ points }: { points: Point[] }) {
-  const positions = useMemo(() => {
-    const arr = new Float32Array(points.length * 3);
-    for (let i = 0; i < points.length; i++) {
-      arr[i * 3 + 0] = points[i].x;
-      arr[i * 3 + 1] = points[i].y;
-      arr[i * 3 + 2] = points[i].z;
-    }
-    return arr;
-  }, [points]);
+/**
+ * Interpolates point cloud between two snapshots a -> b using t in [0,1].
+ * Assumes points correspond by index (same ordering). Uses min length.
+ */
+function LerpPointCloud({ a, b, t }: { a: Point[]; b: Point[]; t: number }) {
+  // Create geometry once
+  const geom = useMemo(() => new THREE.BufferGeometry(), []);
 
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    g.computeBoundingSphere();
-    return g;
-  }, [positions]);
+  // Create / re-create attribute when point counts change
+  const attr = useMemo(() => {
+    const n = Math.min(a.length, b.length);
+    const arr = new Float32Array(n * 3);
+    const attribute = new THREE.BufferAttribute(arr, 3);
+    geom.setAttribute("position", attribute);
+    geom.computeBoundingSphere();
+    return attribute;
+  }, [geom, a.length, b.length]);
+
+  // Update positions each frame
+  useFrame(() => {
+    const n = Math.min(a.length, b.length);
+    const arr = attr.array as Float32Array;
+
+    for (let i = 0; i < n; i++) {
+      const ax = a[i].x,
+        ay = a[i].y,
+        az = a[i].z;
+      const bx = b[i].x,
+        by = b[i].y,
+        bz = b[i].z;
+
+      arr[i * 3 + 0] = ax + (bx - ax) * t;
+      arr[i * 3 + 1] = ay + (by - ay) * t;
+      arr[i * 3 + 2] = az + (bz - az) * t;
+    }
+
+    attr.needsUpdate = true;
+    geom.computeBoundingSphere();
+  });
 
   return (
-    <points geometry={geometry}>
-      <pointsMaterial
-        color="#7CFFB2"
-        size={0.12}
-        sizeAttenuation
-      />
+    <points geometry={geom}>
+      <pointsMaterial color="#7CFFB2" size={0.12} sizeAttenuation />
     </points>
   );
 }
@@ -48,13 +66,20 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [playing, setPlaying] = useState(true);
-  const [frame, setFrame] = useState<1 | 2>(1);
+
+  // Animation progress [0..1], ping-pongs between 0 and 1
+  const [t, setT] = useState(0);
+  const [dir, setDir] = useState<1 | -1>(1);
 
   // Load both CSV snapshots (each returns x,y,z)
   useEffect(() => {
     Promise.all([
-      fetch("http://127.0.0.1:5001/api/data?file=1").then((r) => r.json() as Promise<ApiData>),
-      fetch("http://127.0.0.1:5001/api/data?file=2").then((r) => r.json() as Promise<ApiData>),
+      fetch("http://127.0.0.1:5001/api/data?file=1").then(
+        (r) => r.json() as Promise<ApiData>
+      ),
+      fetch("http://127.0.0.1:5001/api/data?file=2").then(
+        (r) => r.json() as Promise<ApiData>
+      ),
     ])
       .then(([d1, d2]) => {
         setP1(d1.points ?? []);
@@ -67,22 +92,60 @@ export default function Home() {
       });
   }, []);
 
-  // Flip between the two snapshots
+  // Fixed center so axes/grid don't "follow" the object.
+  // (Uses average of all points across both frames.)
+  const fixedCenter = useMemo(() => {
+    const all = [...p1, ...p2];
+    if (all.length === 0) return [0, 0, 0] as [number, number, number];
+    let sx = 0,
+      sy = 0,
+      sz = 0;
+    for (const p of all) {
+      sx += p.x;
+      sy += p.y;
+      sz += p.z;
+    }
+    return [sx / all.length, sy / all.length, sz / all.length] as [
+      number,
+      number,
+      number
+    ];
+  }, [p1, p2]);
+
+  // Smooth ping-pong animation between the two snapshots
   useEffect(() => {
     if (!playing) return;
-    const id = setInterval(() => setFrame((f) => (f === 1 ? 2 : 1)), 700);
-    return () => clearInterval(id);
-  }, [playing]);
 
-  const displayPoints = frame === 1 ? p1 : p2;
+    let raf = 0;
+    let last = performance.now();
 
-  // Center camera roughly around points (simple heuristic)
-  const center = useMemo(() => {
-    if (displayPoints.length === 0) return [0, 0, 0] as [number, number, number];
-    let sx = 0, sy = 0, sz = 0;
-    for (const p of displayPoints) { sx += p.x; sy += p.y; sz += p.z; }
-    return [sx / displayPoints.length, sy / displayPoints.length, sz / displayPoints.length] as [number, number, number];
-  }, [displayPoints]);
+    // Tuning knob: seconds to go from t=0 -> t=1 (lower = faster)
+    const secondsPerLeg = 0.7;
+
+    const loop = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+
+      setT((prev) => {
+        let next = prev + dir * (dt / secondsPerLeg);
+        if (next >= 1) {
+          next = 1;
+          setDir(-1);
+        } else if (next <= 0) {
+          next = 0;
+          setDir(1);
+        }
+        return next;
+      });
+
+      raf = requestAnimationFrame(loop);
+    };
+
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, dir]);
+
+  const pointCount = Math.min(p1.length, p2.length);
 
   if (isLoading) {
     return (
@@ -137,15 +200,25 @@ export default function Home() {
               <CardContent>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-xs text-white/60">
-                    detected_positions{frame === 1 ? "" : "2"}.csv • points: {displayPoints.length}
+                    detected_positions.csv ↔ detected_positions2.csv • points:{" "}
+                    {pointCount} • t: {t.toFixed(2)}
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => setPlaying((p) => !p)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPlaying((p) => !p)}
+                  >
                     {playing ? "Pause" : "Play"}
                   </Button>
                 </div>
 
                 <div className="h-[32vh] rounded-xl border border-white/10 bg-[#060B15] overflow-hidden">
-                  <Canvas camera={{ position: [center[0], center[1], center[2] + 10], fov: 50 }}>
+                  <Canvas
+                    camera={{
+                      position: [fixedCenter[0], fixedCenter[1], fixedCenter[2] + 10],
+                      fov: 50,
+                    }}
+                  >
                     <ambientLight intensity={0.7} />
                     <pointLight position={[10, 10, 10]} intensity={0.8} />
 
@@ -164,17 +237,28 @@ export default function Home() {
                     {/* Axes */}
                     <axesHelper args={[5]} />
 
-                    {/* Point cloud */}
-                    <PointCloud points={displayPoints} />
+                    {/* Interpolated point cloud */}
+                    <LerpPointCloud a={p1} b={p2} t={t} />
 
-                    {/* Controls */}
-                    <OrbitControls target={center} enablePan enableRotate enableZoom />
+                    {/* Controls locked to fixed center so world doesn't "track" */}
+                    <OrbitControls
+                      target={fixedCenter}
+                      enablePan
+                      enableRotate
+                      enableZoom
+                    />
                   </Canvas>
                 </div>
 
                 <div className="mt-2 text-[11px] text-white/50">
                   Drag to rotate • Scroll to zoom
                 </div>
+
+                {p1.length !== p2.length && (
+                  <div className="mt-2 text-[11px] text-amber-300/80">
+                    Note: point counts differ (frame1={p1.length}, frame2={p2.length}). Interpolating first {pointCount} points by index.
+                  </div>
+                )}
               </CardContent>
             </Card>
 
