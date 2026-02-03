@@ -95,9 +95,9 @@ export default function Home() {
 
   const [playing, setPlaying] = useState(true);
 
-  // Animation state: we tween between endpoints rather than hard flip
-  const [segment, setSegment] = useState<1 | 2>(1); // 1 = p1->p2, 2 = p2->p1
-  const [t, setT] = useState(0); // 0..1 progress within current segment
+  // Ping-pong tween progress 0..1, and direction (+1 forward, -1 backward)
+  const [t, setT] = useState(0);
+  const dirRef = useRef<1 | -1>(1);
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
 
@@ -143,7 +143,7 @@ export default function Home() {
       });
   }, []);
 
-  // Animate t between 0 and 1, then swap segment and continue
+  // Animate t continuously back-and-forth (ping-pong)
   useEffect(() => {
     if (!playing) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -152,19 +152,25 @@ export default function Home() {
       return;
     }
 
-    const DURATION_MS = 700; // match your previous flip interval feel
+    const DURATION_MS = 700; // one-way duration (0->1 or 1->0)
+
     const step = (ts: number) => {
       if (lastTsRef.current == null) lastTsRef.current = ts;
       const dt = ts - lastTsRef.current;
       lastTsRef.current = ts;
 
       setT((prev) => {
-        const next = prev + dt / DURATION_MS;
+        let next = prev + (dt / DURATION_MS) * dirRef.current;
+
+        // Bounce at ends without resetting
         if (next >= 1) {
-          // complete this segment, swap direction, restart at 0
-          setSegment((s) => (s === 1 ? 2 : 1));
-          return 0;
+          next = 1;
+          dirRef.current = -1;
+        } else if (next <= 0) {
+          next = 0;
+          dirRef.current = 1;
         }
+
         return next;
       });
 
@@ -180,16 +186,14 @@ export default function Home() {
     };
   }, [playing]);
 
-  const [fromPts, toPts] = segment === 1 ? [p1, p2] : [p2, p1];
-
   const displayPoints = useMemo(() => {
-    // Smoothstep feel (optional): makes easing nicer than linear
-    const tt = t * t * (3 - 2 * t); // smoothstep
-    return interpolatePoints(fromPts, toPts, tt);
-  }, [fromPts, toPts, t]);
+    // Smoothstep easing (nice feel)
+    const tt = t * t * (3 - 2 * t);
+    return interpolatePoints(p1, p2, tt);
+  }, [p1, p2, t]);
 
-  // For label only (keeps your “which csv” text intuitive)
-  const labelFrame: 1 | 2 = segment === 1 ? (t < 0.5 ? 1 : 2) : t < 0.5 ? 2 : 1;
+  // Label only
+  const labelFrame: 1 | 2 = t < 0.5 ? 1 : 2;
 
   if (isLoading) {
     return (
@@ -312,5 +316,3 @@ export default function Home() {
     </div>
   );
 }
-
-
