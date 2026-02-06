@@ -15,6 +15,11 @@ interface ApiData {
   points: Point[];
 }
 
+interface Detection {
+  label: string;
+  confidence: number;
+}
+
 function computeCenter(points: Point[]): [number, number, number] {
   if (!points.length) return [0, 0, 0];
   let sx = 0,
@@ -94,6 +99,7 @@ export default function Home() {
   const [p1, setP1] = useState<Point[]>([]);
   const [p2, setP2] = useState<Point[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [detections, setDetections] = useState<Detection[]>([]);
 
   const [playing, setPlaying] = useState(true);
 
@@ -143,6 +149,20 @@ export default function Home() {
         console.error(e);
         setIsLoading(false);
       });
+  }, []);
+
+  // Fetch detected objects periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch("http://127.0.0.1:5001/api/detections")
+        .then((r) => r.json())
+        .then((data: { detections: Detection[] }) => {
+          setDetections(data.detections);
+        })
+        .catch((e) => console.error("Failed to fetch detections:", e));
+    }, 1000); // Poll every 1000ms
+
+    return () => clearInterval(interval);
   }, []);
 
   // Animate t continuously back-and-forth (ping-pong)
@@ -302,38 +322,46 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* ✅ Partner's Detected Objects card added without changing your logic */}
+            {/* ✅ Detected Objects card with live data from webcam */}
             <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold tracking-wide text-white/90">
-                  Detected Objects
+                  Detected Objects ({detections.length})
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <DetectedObjectNotification
-                  icon="🚶"
-                  object="Pedestrian"
-                  distance="15m"
-                  speed="5 km/h"
-                  angle="45°"
-                  riskLevel="High"
-                />
-                <DetectedObjectNotification
-                  icon="🚗"
-                  object="Vehicle"
-                  distance="30m"
-                  speed="60 km/h"
-                  angle="0°"
-                  riskLevel="Medium"
-                />
-                <DetectedObjectNotification
-                  icon="🚴"
-                  object="Cyclist"
-                  distance="8m"
-                  speed="20 km/h"
-                  angle="90°"
-                  riskLevel="Low"
-                />
+                {detections.length === 0 ? (
+                  <div className="text-xs text-white/50">No objects detected</div>
+                ) : (
+                  detections.map((det, idx) => (
+                    <DetectedObjectNotification
+                      key={idx}
+                      icon={
+                        det.label.toLowerCase().includes("person")
+                          ? "🚶"
+                          : det.label.toLowerCase().includes("car") ||
+                            det.label.toLowerCase().includes("vehicle") ||
+                            det.label.toLowerCase().includes("truck")
+                          ? "🚗"
+                          : det.label.toLowerCase().includes("bike") ||
+                            det.label.toLowerCase().includes("bicycle")
+                          ? "🚴"
+                          : "📦"
+                      }
+                      object={det.label}
+                      distance="–"
+                      speed="–"
+                      angle="–"
+                      riskLevel={
+                        det.confidence > 0.8
+                          ? "High"
+                          : det.confidence > 0.6
+                          ? "Medium"
+                          : "Low"
+                      }
+                    />
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>

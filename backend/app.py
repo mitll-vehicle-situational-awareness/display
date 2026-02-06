@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, render_template, Response
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import csv
 import os
@@ -66,7 +66,7 @@ def radar_points_alias():
 
 
 # ----------------------------
-# Webcam streaming (MJPEG)
+# Webcam streaming (MJPEG) with YOLOv3 overlays
 # ----------------------------
 def make_camera(src: int = 0):
     # Platform-specific backend selection improves reliability
@@ -83,10 +83,69 @@ def make_camera(src: int = 0):
     return cap
 
 
-def gen_frames(src: int = 0):
+# Load YOLO model and class names (once)
+_backend_dir = os.path.dirname(__file__)
+_cfg_path = os.path.join(_backend_dir, "yolov3.cfg")
+_weights_path = os.path.join(_backend_dir, "yolov3.weights")
+_names_path = os.path.join(_backend_dir, "coco.names")
+
+yolo_net = None
+yolo_layer_names = []
+yolo_labels = []
+yolo_colors = None
+
+# Global state: store latest detections for API access
+current_detections = []
+detections_lock = __import__('threading').Lock()
+
+
+def load_yolo():
+    global yolo_net, yolo_layer_names, yolo_labels, yolo_colors
+    if yolo_net is not None:
+        return
+
+    if not (os.path.exists(_cfg_path) and os.path.exists(_weights_path) and os.path.exists(_names_path)):
+        print("YOLO files not found in backend/. Skipping detection overlay.")
+        return
+
+    yolo_labels = []
+    with open(_names_path, "r") as f:
+        for line in f:
+            name = line.strip()
+            if name:
+                yolo_labels.append(name)
+
+    yolo_colors = np.random.randint(0, 255, size=(len(yolo_labels), 3), dtype="uint8")
+
+    yolo_net = cv2.dnn.readNetFromDarknet(_cfg_path, _weights_path)
+    # Use CPU backend by default; uncomment to try CUDA if available
+    # yolo_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+    # yolo_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+
+    # determine output layer names
+    ln = yolo_net.getLayerNames()
+    try:
+        yolo_layer_names = [ln[i[0] - 1] for i in yolo_net.getUnconnectedOutLayers()]
+    except Exception:
+        # compatibility fallback
+        yolo_layer_names = [ln[i - 1] for i in yolo_net.getUnconnectedOutLayers()]
+
+
+def gen_frames(src: int = 0, skip: int = 4, input_size: int = 416, conf_threshold: float = 0.5, nms_threshold: float = 0.4):
+    """
+    Stream frames from `src` while running YOLO inference only every `skip` frames.
+    `input_size` controls the DNN input (smaller => faster, less accurate).
+    """
+    load_yolo()
     cap = make_camera(src)
     if not cap.isOpened():
         return
+
+    frame_count = 0
+    last_boxes = []
+    last_confidences = []
+    last_classIDs = []
+    last_draw_indices = []
 
     try:
         while True:
@@ -94,14 +153,109 @@ def gen_frames(src: int = 0):
             if not success:
                 break
 
+            (H, W) = frame.shape[:2]
+
+            # If YOLO isn't available, just stream raw frames
+            if yolo_net is None:
+                ok, buffer = cv2.imencode(".jpg", frame)
+                if not ok:
+                    continue
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
+                )
+                continue
+
+            # Only run the heavy detection every `skip` frames
+            if frame_count % max(1, skip) == 0:
+                blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (input_size, input_size), swapRB=True, crop=False)
+                yolo_net.setInput(blob)
+                layer_outputs = yolo_net.forward(yolo_layer_names)
+
+                boxes = []
+                confidences = []
+                classIDs = []
+
+                for output in layer_outputs:
+                    for detection in output:
+                        scores = detection[5:]
+                        classID = np.argmax(scores)
+                        confidence = float(scores[classID])
+
+                        if confidence > conf_threshold:
+                            box = detection[0:4] * np.array([W, H, W, H])
+                            (centerX, centerY, width, height) = box.astype("int")
+
+                            x = int(centerX - (width / 2))
+                            y = int(centerY - (height / 2))
+
+                            boxes.append([x, y, int(width), int(height)])
+                            confidences.append(float(confidence))
+                            classIDs.append(classID)
+
+                idxs = []
+                if len(boxes) > 0:
+                    idxs = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, nms_threshold)
+
+                # store last detections to reuse on skipped frames
+                last_boxes = boxes
+                last_confidences = confidences
+                last_classIDs = classIDs
+
+                draw_indices = []
+                if len(idxs) > 0:
+                    try:
+                        draw_indices = idxs.flatten().astype(int).tolist()
+                    except Exception:
+                        # sometimes idxs is already a flat list or tuple
+                        draw_indices = [int(i) for i in idxs]
+
+                # persist the selected indices so skipped frames draw the same filtered set
+                last_draw_indices = draw_indices
+            else:
+                # reuse last detection indices (NMS-selected) on skipped frames
+                draw_indices = list(last_draw_indices)
+
+            # Update global detections state (only freshly computed detections)
+            if frame_count % max(1, skip) == 0 and len(last_draw_indices) > 0:
+                with detections_lock:
+                    current_detections.clear()
+                    for i in last_draw_indices:
+                        try:
+                            label = yolo_labels[last_classIDs[i]]
+                            confidence = last_confidences[i]
+                            current_detections.append({
+                                "label": label,
+                                "confidence": round(float(confidence), 3)
+                            })
+                        except Exception:
+                            pass
+
+            # Draw (either freshly computed or reused) boxes
+            for i in draw_indices:
+                try:
+                    (x, y) = (last_boxes[i][0], last_boxes[i][1])
+                    (w, h) = (last_boxes[i][2], last_boxes[i][3])
+                    color = [int(c) for c in yolo_colors[last_classIDs[i]]]
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                    text = f"{yolo_labels[last_classIDs[i]]}: {last_confidences[i]:.2f}"
+                    (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    cv2.rectangle(frame, (x, y - text_h - 6), (x + text_w, y), color, -1)
+                    cv2.putText(frame, text, (x, y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                except Exception:
+                    continue
+
             ok, buffer = cv2.imencode(".jpg", frame)
             if not ok:
+                frame_count += 1
                 continue
 
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
             )
+
+            frame_count += 1
     finally:
         cap.release()
 
@@ -109,7 +263,7 @@ def gen_frames(src: int = 0):
 @app.route("/api/webcam")
 def webcam():
     """
-    MJPEG stream endpoint.
+    MJPEG stream endpoint with YOLO overlays.
     Use /api/webcam?src=0 (default) or src=1 if you have multiple cameras.
     """
     src = request.args.get("src", default="0")
@@ -122,6 +276,16 @@ def webcam():
         gen_frames(src_int),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@app.route("/api/detections")
+def get_detections():
+    """
+    Returns the latest detected objects from the webcam stream.
+    Format: [{"label": "person", "confidence": 0.95}, ...]
+    """
+    with detections_lock:
+        return jsonify({"detections": list(current_detections)})
 
 
 if __name__ == "__main__":
