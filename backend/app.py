@@ -1,13 +1,14 @@
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, render_template, Response
 from flask_cors import CORS
 import csv
 import os
 import sys
 import cv2
-
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)
+
 
 # ----------------------------
 # Radar CSV helpers (now includes z)
@@ -72,7 +73,7 @@ def make_camera(src: int = 0):
     if sys.platform.startswith("win"):
         cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)  # Windows
     elif sys.platform == "darwin":
-        cap = cv2.VideoCapture(src)  # macOS
+        cap = cv2.VideoCapture(src, cv2.CAP_AVFOUNDATION)  # macOS
     else:
         cap = cv2.VideoCapture(src, cv2.CAP_V4L2)  # Linux
 
