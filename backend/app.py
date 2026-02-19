@@ -78,6 +78,7 @@ def make_camera(src: int = 0):
         cap = cv2.VideoCapture(src, cv2.CAP_V4L2)  # Linux
 
     # Optional: request resolution (camera may ignore)
+    # Note: Adjust to ECE params (for optimization later)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     return cap
