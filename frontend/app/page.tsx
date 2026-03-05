@@ -152,6 +152,7 @@ export default function Home() {
   }, []);
 
   // Fetch detected objects periodically
+
   useEffect(() => {
     const interval = setInterval(() => {
       fetch("http://127.0.0.1:5001/api/detections")

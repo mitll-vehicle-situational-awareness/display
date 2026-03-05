@@ -86,8 +86,7 @@ def make_camera(src: int = 0):
 
 # Load YOLO model and class names (once)
 _backend_dir = os.path.dirname(__file__)
-_cfg_path = os.path.join(_backend_dir, "yolov3.cfg")
-_weights_path = os.path.join(_backend_dir, "yolov3.weights")
+_onnx_path = os.path.join(_backend_dir, "yolov8n.onnx")
 _names_path = os.path.join(_backend_dir, "coco.names")
 
 yolo_net = None
@@ -105,7 +104,7 @@ def load_yolo():
     if yolo_net is not None:
         return
 
-    if not (os.path.exists(_cfg_path) and os.path.exists(_weights_path) and os.path.exists(_names_path)):
+    if not (os.path.exists(_onnx_path) and os.path.exists(_names_path)):
         print("YOLO files not found in backend/. Skipping detection overlay.")
         return
 
@@ -118,21 +117,14 @@ def load_yolo():
 
     yolo_colors = np.random.randint(0, 255, size=(len(yolo_labels), 3), dtype="uint8")
 
-    yolo_net = cv2.dnn.readNetFromDarknet(_cfg_path, _weights_path)
-    # Use CPU backend by default; uncomment to try CUDA if available
-    # yolo_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-    # yolo_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+    yolo_net = cv2.dnn.readNet(_onnx_path)
+    yolo_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+    yolo_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-    # determine output layer names
-    ln = yolo_net.getLayerNames()
-    try:
-        yolo_layer_names = [ln[i[0] - 1] for i in yolo_net.getUnconnectedOutLayers()]
-    except Exception:
-        # compatibility fallback
-        yolo_layer_names = [ln[i - 1] for i in yolo_net.getUnconnectedOutLayers()]
+    yolo_layer_names = yolo_net.getUnconnectedOutLayersNames()
 
 
-def gen_frames(src: int = 0, skip: int = 4, input_size: int = 416, conf_threshold: float = 0.5, nms_threshold: float = 0.4):
+def gen_frames(src: int = 0, skip: int = 4, input_size: int = 640, conf_threshold: float = 0.5, nms_threshold: float = 0.4):
     """
     Stream frames from `src` while running YOLO inference only every `skip` frames.
     `input_size` controls the DNN input (smaller => faster, less accurate).
@@ -169,34 +161,44 @@ def gen_frames(src: int = 0, skip: int = 4, input_size: int = 416, conf_threshol
 
             # Only run the heavy detection every `skip` frames
             if frame_count % max(1, skip) == 0:
-                blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (input_size, input_size), swapRB=True, crop=False)
+                blob = cv2.dnn.blobFromImage(frame, 1/255.0, (640, 640), swapRB=True, crop=False)
                 yolo_net.setInput(blob)
-                layer_outputs = yolo_net.forward(yolo_layer_names)
+                outputs = yolo_net.forward(yolo_layer_names)
 
+                # Post-process outputs to extract boxes, confidences, and classes
                 boxes = []
                 confidences = []
                 classIDs = []
-
-                for output in layer_outputs:
-                    for detection in output:
-                        scores = detection[5:]
-                        classID = np.argmax(scores)
-                        confidence = float(scores[classID])
-
-                        if confidence > conf_threshold:
-                            box = detection[0:4] * np.array([W, H, W, H])
-                            (centerX, centerY, width, height) = box.astype("int")
-
-                            x = int(centerX - (width / 2))
-                            y = int(centerY - (height / 2))
-
-                            boxes.append([x, y, int(width), int(height)])
-                            confidences.append(float(confidence))
-                            classIDs.append(classID)
-
-                idxs = []
-                if len(boxes) > 0:
-                    idxs = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, nms_threshold)
+                
+                # YOLOv8 output format: (1, 84, 8400)
+                # 84 = 4 box coordinates + 80 class probabilities
+                output = outputs[0].transpose()
+                
+                for detection in output:
+                    # Extract box coordinates and confidence scores
+                    box_coords = detection[:4]
+                    class_scores = detection[4:]
+                    
+                    # Get the class with highest confidence
+                    confidence = np.max(class_scores)
+                    class_id = np.argmax(class_scores)
+                    
+                    # Filter by confidence threshold
+                    if confidence > conf_threshold:
+                        # Convert from center coordinates to corner coordinates
+                        center_x = int(box_coords[0] * W)
+                        center_y = int(box_coords[1] * H)
+                        width = int(box_coords[2] * W)
+                        height = int(box_coords[3] * H)
+                        
+                        x1 = center_x - width // 2
+                        y1 = center_y - height // 2
+                        
+                        boxes.append([x1, y1, width, height])
+                        confidences.append(float(confidence))
+                        classIDs.append(class_id)
+                
+                idxs = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, nms_threshold)
 
                 # store last detections to reuse on skipped frames
                 last_boxes = boxes
