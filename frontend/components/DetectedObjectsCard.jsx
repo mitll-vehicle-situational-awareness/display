@@ -42,31 +42,32 @@ export default function DetectedObjectsCard() {
   }, []);
 
   return (
-    <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
-      <CardHeader className="pb-2">
+    <Card className="flex h-[42vh] flex-col rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
+      <CardHeader className="shrink-0 pb-2">
         <CardTitle className="text-sm font-semibold tracking-wide text-white/90">
           Detected Objects ({detections.length})
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-3">
-        {detections.length === 0 ? (
-          <div className="text-xs text-white/50">No objects detected</div>
-        ) : (
-          detections.map((det, idx) => (
-            <DetectedObjectNotification
-              key={idx}
-              icon={getIcon(det.label)}
-              object={det.label}
-              distance="-"
-              speed="-"
-              angle="-"
-              riskLevel={getRiskLevel(det.confidence)}
-            />
-          ))
-        )}
+      <CardContent className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-3 pr-1">
+          {detections.length === 0 ? (
+            <div className="text-xs text-white/50">No objects detected</div>
+          ) : (
+            detections.map((det, idx) => (
+              <DetectedObjectNotification
+                key={idx}
+                icon={getIcon(det.label)}
+                object={det.label}
+                distance="-"
+                speed="-"
+                angle="-"
+                riskLevel={getRiskLevel(det.confidence)}
+              />
+            ))
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
-
