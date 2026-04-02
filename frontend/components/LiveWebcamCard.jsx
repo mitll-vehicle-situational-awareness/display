@@ -16,7 +16,7 @@ export default function LiveWebcamCard() {
 
       <div className="relative h-[78vh]">
         <img
-          src="http://127.0.0.1:5001/api/webcam"
+          src="http://10.5.8.16:5001/api/webcam"
           alt="Live webcam"
           className="absolute inset-0 h-full w-full object-cover"
         />
