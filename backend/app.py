@@ -5,7 +5,16 @@ import os
 import sys
 import cv2
 import numpy as np
-from picamera2 import Picamera2
+
+try:
+    from picamera2 import Picamera2
+    picam2 = Picamera2()
+    picam2.configure(picam2.create_preview_configuration())
+    picam2.start()
+    USE_PI_CAMERA = True
+except ImportError:
+    print("Picamera2 not available, using fallback camera")
+    USE_PI_CAMERA = False
 
 app = Flask(__name__)
 CORS(app)
