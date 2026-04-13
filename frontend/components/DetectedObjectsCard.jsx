@@ -30,7 +30,7 @@ export default function DetectedObjectsCard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch("http://10.5.8.16:5001/api/detections")
+      fetch("http://127.0.0.1:5000/api/detections")
         .then((r) => r.json())
         .then((data) => {
           setDetections(data.detections ?? []);

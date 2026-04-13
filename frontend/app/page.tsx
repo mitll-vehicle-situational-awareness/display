@@ -2,6 +2,7 @@
 
 import LiveWebcamCard from "@/components/LiveWebcamCard";
 import RadarDisplayCard from "@/components/RadarDisplayCard";
+import RangeDopplerCard from "@/components/RangeDopplerCard";
 import DetectedObjectsCard from "@/components/DetectedObjectsCard";
 
 export default function Home() {
@@ -14,7 +15,8 @@ export default function Home() {
           </div>
 
           <div className="w-1/3 flex flex-col gap-6">
-            <RadarDisplayCard />
+            {/* <RadarDisplayCard /> */}
+            <RangeDopplerCard />
             <DetectedObjectsCard />
           </div>
         </div>

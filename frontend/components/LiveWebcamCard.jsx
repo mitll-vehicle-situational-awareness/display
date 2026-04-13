@@ -1,9 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 export default function LiveWebcamCard() {
+  const [webcamSrc, setWebcamSrc] = useState(
+    "http://127.0.0.1:5001/api/webcam"
+  );
+
+  useEffect(() => {
+    setWebcamSrc(`http://${window.location.hostname}:5001/api/webcam`);
+  }, []);
+
   return (
     <Card className="rounded-2xl border border-white/10 bg-[#0B1221] shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
       <div className="px-4 pt-4">
@@ -17,7 +26,7 @@ export default function LiveWebcamCard() {
 
         <div className="relative h-[78vh] overflow-hidden rounded-xl border border-white/10 bg-black">
           <img
-            src="http://10.5.8.16:5001/api/webcam"
+            src={webcamSrc}
             alt="Live webcam"
             className="absolute inset-0 h-full w-full object-cover"
           />

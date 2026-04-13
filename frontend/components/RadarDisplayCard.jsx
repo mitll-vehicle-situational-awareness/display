@@ -98,8 +98,8 @@ export default function RadarDisplayCard() {
 
   useEffect(() => {
     Promise.all([
-      fetch("http://10.5.8.16:5001/api/data?file=1").then((r) => r.json()),
-      fetch("http://10.5.8.16:5001/api/data?file=2").then((r) => r.json()),
+      fetch("http://127.0.0.1:5001/api/data?file=1").then((r) => r.json()),
+      fetch("http://127.0.0.1:5001/api/data?file=2").then((r) => r.json()),
     ])
       .then(([d1, d2]) => {
         const pts1 = d1.points ?? [];
