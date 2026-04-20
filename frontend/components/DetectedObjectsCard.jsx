@@ -2,7 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useEffect, useState } from "react";
-import { DetectedObjectNotification } from "@/components/ui/DetectedObjectNotification";
+import { DetectedObjectNotification } from "@/components/DetectedObjectNotification";
 
 function getIcon(label) {
   const lower = label.toLowerCase();
@@ -30,7 +30,7 @@ export default function DetectedObjectsCard() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch("http://127.0.0.1:5000/api/detections")
+      fetch(`http://${window.location.hostname}:5001/api/detections`)
         .then((r) => r.json())
         .then((data) => {
           setDetections(data.detections ?? []);

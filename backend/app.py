@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request, Response
+import traceback
 from flask_cors import CORS
 import csv
 import os
@@ -13,6 +14,10 @@ import base64
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# Process every Nth frame; drop the rest. Set to 1 to process every frame.
+FRAME_SKIP = 3
+_frame_counter = 0
 
 # --------------------------------------------------
 # Import live radar/camera interface from ECE_TEST
@@ -127,11 +132,10 @@ def load_yolo():
     yolo_layer_names = yolo_net.getUnconnectedOutLayersNames()
 
 
-def run_yolo_on_frame(frame_bgr, conf_threshold=0.15, nms_threshold=0.4):
+def run_yolo_on_frame(frame, conf_threshold=0.15, nms_threshold=0.4):
     if yolo_net is None:
-        return frame_bgr, []
+        return frame, []
 
-    frame = frame_bgr.copy()
     h, w = frame.shape[:2]
 
     blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (640, 640), swapRB=False, crop=False)
@@ -207,13 +211,18 @@ def run_yolo_on_frame(frame_bgr, conf_threshold=0.15, nms_threshold=0.4):
 # --------------------------------------------------
 def sensor_callback(timestamp, image_buf, radar_buf):
     global latest_timestamp, latest_camera_jpeg, latest_camera_bgr, latest_radar_buf, current_detections
-    
+    global _frame_counter
+
+    _frame_counter += 1
+    if _frame_counter % FRAME_SKIP != 0:
+        return
+
     try:
-        print(f"Callback called, timestamp: {timestamp}, image_buf len: {len(image_buf)}")
-        arr = np.frombuffer(image_buf, dtype=np.uint8).reshape(IMAGE_HEIGHT, IMAGE_WIDTH, 3)
-        peek = np.frombuffer(radar_buf[:32], dtype=np.int16)
-        print(f"DEBUG peek int16: {peek}")
-        annotated_frame, detections = run_yolo_on_frame(arr)
+        # image_buf is already (720, 1280, 3) uint8 from the SDK
+        arr = np.ascontiguousarray(image_buf)
+
+        small = cv2.resize(arr, (640, 360))
+        annotated_frame, detections = run_yolo_on_frame(small)
 
         ok, buffer = cv2.imencode(".jpg", annotated_frame)
         if not ok:
@@ -229,6 +238,7 @@ def sensor_callback(timestamp, image_buf, radar_buf):
 
     except Exception as e:
         print("sensor_callback error:", e)
+        traceback.print_exc()
 
 # --------------------------------------------------
 # Start interface in background
@@ -314,22 +324,42 @@ def generate_range_doppler_heatmap(radar_buf):
         return None
     try:
         NUM_TX, NUM_LOOPS, NUM_RX, NUM_ADC = 3, 16, 4, 256
+        NUM_CHIRPS_PER_FRAME = NUM_TX * NUM_LOOPS  # 48
 
         raw_int16 = np.frombuffer(radar_buf, dtype=np.int16)
-        iq = raw_int16.reshape(-1, 2).astype(np.float32)
-        radar_array = iq[:, 0] + 1j * iq[:, 1]
-        frame_raw = radar_array.reshape(NUM_TX, NUM_LOOPS, NUM_RX, NUM_ADC)
+
+        # Align to IIQQ packet width (groups of 4 int16s)
+        if raw_int16.size % 4 != 0:
+            raw_int16 = raw_int16[: (raw_int16.size // 4) * 4]
+
+        # IIQQ -> IQIQ reorder (DCA1000 packs as I0 I1 Q0 Q1, swap inner two)
+        iq_reordered = np.copy(raw_int16)
+        iq_reordered[1::4] = raw_int16[2::4]
+        iq_reordered[2::4] = raw_int16[1::4]
+        iq_data = iq_reordered[0::2].astype(np.float32) + 1j * iq_reordered[1::2].astype(np.float32)
+
+        samples_per_frame = NUM_CHIRPS_PER_FRAME * NUM_RX * NUM_ADC  # 49152
+        if iq_data.size < samples_per_frame:
+            print(f"radar_buf too small: {iq_data.size} complex samples, need {samples_per_frame}")
+            return None
+
+        # De-interleave TDM-MIMO chirps: stream is TX0,TX1,TX2,TX0,TX1,TX2,...
+        iq_data = iq_data[:samples_per_frame]
+        cube = iq_data.reshape(NUM_CHIRPS_PER_FRAME, NUM_RX, NUM_ADC)
+        cube = cube.reshape(NUM_LOOPS, NUM_TX, NUM_RX, NUM_ADC)  # TX cycles fastest
+        frame_raw = np.transpose(cube, (1, 0, 2, 3))             # -> (TX, loop, RX, ADC)
 
         radar = RadarSensor(frame_raw)
         range_cube, rd_cube_txrx = radar.process_tdm_mimo_cube(frame_raw)
-        # rd_cube_txrx is already fftshifted on doppler axis — do NOT shift again
 
         rd_power = np.sum(np.abs(rd_cube_txrx) ** 2, axis=(1, 2))  # [range, doppler]
         rd_db = 10.0 * np.log10(rd_power + EPSILON)
 
-        # Plot with axes and colorbar to match the reference image style.
         fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-        extent = [radar.velocity_axis[0], radar.velocity_axis[-1], radar.range_axis[0], radar.range_axis[-1]]
+        extent = [
+            radar.velocity_axis[0], radar.velocity_axis[-1],
+            radar.range_axis[0],    radar.range_axis[-1],
+        ]
         im = ax.imshow(
             rd_db,
             origin="lower",
@@ -339,25 +369,23 @@ def generate_range_doppler_heatmap(radar_buf):
             vmax=np.max(rd_db),
             extent=extent,
         )
-
-        ax.set_title("Range-Doppler Map")
+        ax.set_ylim(0, 6)  # clip range axis to 0-6 m
+        ax.set_xlim(-10, 10)
         ax.set_xlabel("Velocity (m/s)")
         ax.set_ylabel("Range (m)")
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("Magnitude (dB)")
 
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png", dpi=100, bbox_inches="tight")
         plt.close(fig)
         buffer.seek(0)
-
         return Image.open(buffer).copy()
 
     except Exception as e:
         print(f"ERROR generating range-doppler heatmap: {e}")
-        import traceback; traceback.print_exc()
+        traceback.print_exc()
         return None
 
+        
 @app.route("/api/range-doppler")
 def get_range_doppler():
     """

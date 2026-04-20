@@ -13,7 +13,7 @@ export default function RangeDopplerCard() {
   // Fetch range-doppler heatmap from backend
   const fetchRangeDoppler = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:5001/api/range-doppler");
+      const response = await fetch(`http://${window.location.hostname}:5001/api/range-doppler`);
       
       if (!response.ok) {
         if (response.status === 204) {
@@ -94,11 +94,11 @@ export default function RangeDopplerCard() {
 
           {imageSrc && (
             <img
-              src={imageSrc}
-              alt="Range-Doppler Heatmap"
-              className="w-full h-full object-cover"
+                src={imageSrc}
+                alt="Range-Doppler Heatmap"
+                className="w-full h-full object-contain"
             />
-          )}
+            )}
         </div>
 
       

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 export default function LiveWebcamCard() {
   const [webcamSrc, setWebcamSrc] = useState(
-    "http://127.0.0.1:5001/api/webcam"
+    "http://${window.location.hostname}:5001/api/webcam"
   );
 
   useEffect(() => {
@@ -33,12 +33,12 @@ export default function LiveWebcamCard() {
 
           <div className="absolute inset-0 bg-gradient-to-b from-[#0B1221]/20 via-transparent to-black/30" />
 
-          <div className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 gap-3">
+          {/* <div className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 gap-3">
             <Button variant="destructive">● Stop Recording</Button>
             <Button variant="secondary" disabled>
               Save Recording
             </Button>
-          </div>
+          </div> */}
         </div>
       </div>
     </Card>
